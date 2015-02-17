@@ -1,0 +1,273 @@
+---
+title: "The Cost of Weather"
+author: "Christina Brady"
+date: "February 16, 2015"
+output: html_document
+---
+#Synopsis
+One extreme weather event can often cause several different types of damage or harm, this analysis of the direct cost incurred in US dollars, injuries or fatalities, leads to the conclusion that drought, hurricanes, flooding, extreme heat and tornados cause the most crop damage, property damage and injuries throughout the country. Meanwhile, extreme heat, tornados, flash floods, lightening, and rip currents cause most of the weather related fatalities across the country. However, it is important to note that crop damage, property damage, injuries and fatalities may lead to additional, indirect costs to local, state and national governments and to private citizens. These costs should be carefully measured and considered when making policy decisions. 
+
+#Introduction
+If we are not prepared for them, extreme weather events can cause millions of dollars in damage to property and crops and present serious public health concerns. In order to prepare for them, it is essential to know which types of events cause the most harm and and how that has changed over time. This paper will address these questions by using the U.S National Oceanic and Atmospheric Administration's (NOAA) storm database to analyze which types of weather events result in the most fatalities, injuries, property damage and crop damage. 
+
+The first step in this analysis is to explore structure, quality and quantity of information available to us and determine what, if any, cleaning should be done. The NOAA's dataset includes 902,297 observations on 37 variables and includes records from between 1950 and 2011. Many of these variables and observations will not be used in this analysis and can be eliminated from the working data set. For example, a quick look at the crop damage variable shows that at least 50% of the observations have recorded 0 crop damage. Moreover, the National Climate Data Center states that "[the accuracy of the data prior to 1996 is uncertain because of the way the information was archived by NCDC] [1]". Finally, the data includes 985 unique event types, meanwhile the documention only defines 48 event types. Many of the additional event types are due to different ways of inputting the same event type. The exact code and more detailed explanations of the data cleaning can be found in the section on data processing. 
+
+#Data Processing
+First I set the working directly, loaded the libraries that I would need and read the data from the csv file. 
+```{r, echo=TRUE}
+setwd("~/Documents/Coursera courses/Data Science Specialization/Reproducible Research/RepData_PeerAssessment2")
+library(ggplot2)
+library(plyr)
+library(stringr)
+library(datasets)
+library(gridExtra)
+storm <- read.csv("repdata-data-StormData.csv", stringsAsFactors=FALSE)
+```
+Next, I explored the size and structure of the data set and the quality of the data in the data set. 
+```{r, echo=TRUE}
+dim(storm)
+colnames(storm)
+colnames(storm) <- tolower(colnames(storm)) #to make typing easier
+summary(storm$cropdmg) #shows that 50% of observations have 0 crop damage reported
+```
+
+This is a very large data set with a great deal of information that will not be useful in this analysis, such as country name, longitute, latitute, etc. In order to make the data more manageable, I created a new data set that includes:
+1. only the variables that I will use for the analysis (begin date, fatalities, injuries, crop damage, crop damage exp, property damage, property damage exp, event type, and state);
+2. only those observations have recorded damage in at least one of the four types of damage that will be analyzed (fatalities, injuries, crop damage or property damage);
+3. a variable named "year" which specifies the year in which the event took place, which was extracted from the begin date; 
+4. only data from 1996 and after; 
+5. a multiplier variable that translates the multiplier codes from the variables cropdmgexp and propdmgexp into the numbers that they represent; 
+6. variables for total crop damage and total property damage which were calculated by multiplying the cropdmg and propdmg columns by their respective multipliers. 
+```{r, echo=TRUE}
+int <- c("bgn_date", "fatalities", "injuries", "cropdmg", "cropdmgexp", "propdmg", "propdmgexp", "evtype", "state")
+#subset based on variables of interest
+stormsub <- storm[, colnames(storm) %in% int] 
+#extract only those observations for which damage is recorded
+stormdmg <- subset(stormsub, stormsub$fatalities > 0 | stormsub$injuries > 0 |stormsub$propdmg > 0 | stormsub$cropdmg >0)
+#extract the year from the begin date
+dates <- sapply(stormdmg$bgn_date, FUN=function(x) {strsplit(x, " ")[[1]][1]})
+years <- sapply(dates, FUN=function(x) {strsplit(x, "/")[[1]][3]})
+#create a year variable
+stormdmg$year <- years
+#subset observations from 1996 and after
+storm96 <- stormdmg[stormdmg$year >= 1996,]
+#translate multiplier codes into the numbers they represent
+codes <- c('K'=1000, 'k'=1000, 'M'=1000000, 'm'=1000000, 'B'=1000000000, 'b'=1000000000)
+storm96$cropmulti <- codes[storm96$cropdmgexp]
+storm96$propmulti <- codes[storm96$propdmgexp]
+#replace NA values with 1 so that multiplying by an NA value doesn't create another NA
+storm96$cropmulti[is.na(storm96$cropmulti)] <- 1 
+storm96$propmulti[is.na(storm96$propmulti)] <- 1
+#calculate total crop and property damage variables
+storm96$newcropdmg <- storm96$cropdmg * storm96$cropmulti
+storm96$newpropdmg <- storm96$propdmg * storm96$propmulti
+```
+According to the [documentation] [2], the event type variable should include 48 different types of weather events. However, this data set includes `r length(unique(storm$evtype))` unique event types. I cleaned the event type variable by first, combining different spellings of the same event type. Then, I combined similar event types using the Storm Data Event Table in the Storm Data Preparation documentation as a list of basic event types. If an observation had two distinct event types, I chose the first one that was listed. 
+
+```{r, echo=TRUE}
+storm96$evtype <- tolower(storm96$evtype)
+storm96$combevtype <- storm96$evtype #copy event type variable in order to maintain the original 
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="freeze")] <- "frost/freeze"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="frost")] <- "frost/freeze"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="glaze")] <- "frost/freeze"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="coastal fl")] <- "coastal fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="coastal  fl")] <- "coastal fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="coastal er")] <- "coastal fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="coastal er")] <- "coastal fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="tidal fl")] <- "coastal fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="^thun")] <- "thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="^tstm")] <- "thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="^ tstm")] <- "thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="cold")] <- "cold"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="windchill")] <- "cold"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="dust")] <- "dust devil"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="gusty")] <- "high wind"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="freezing r")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="freezing dri")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="freezing spr")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="rain")] <- "heavy rain"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="surf")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="rogue wave")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="rough seas")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="blowing snow")] <- "blizzard"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="snow")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="warm")] <- "extreme heat"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="seas")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="high swells")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="high water")] <- "high surf"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="hy")] <- "cold"
+#Results
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="^flash")] <- "flash fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="^ flash")] <- "flash fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="ice")] <- "ice storm"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="lakesho")] <- "lakeshore fld"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="flood")] <- "flood"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="urban")] <- "flood"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="slide")] <- "debris flow"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="fire")] <- "wildfire"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="heat")] <- "extreme heat"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="hurricane")] <- "hurricane"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="typhoon")] <- "hurricane"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="surge")] <- "storm surge"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="marine strong wind")] <- "marine strong wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="marine high wind")] <- "marine strong wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="marine thunderstorm wind")] <- "marine thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="marine tstm wind")] <- "marine thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="wind")] <- "strong wind"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="rip")] <- "rip current"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="weather")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="wintry")] <- "winter weather"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="micro")] <- "thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="downburst")] <- "thunderstorm wd"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="funnel")] <- "tornado"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="landsp")] <- "tornado"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="small")] <- "hail"
+storm96$combevtype[str_detect(string=storm96$combevtype, pattern="mixed")] <- "sleet"
+storm96 <- storm96[storm96$combevtype!="marine accident" & storm96$combevtype != "drowning",]
+```
+That leaves a list of event types that is much closer to the Storm Data Event Table. I also eliminated the entries that included "drowning" and "marine accident" as the event type. They are causes of death or damage, but they are not specifically weather events.That leaves me with a data set of `r nrow(storm96)` observations on `r ncol(storm96)` and `r length(unique(storm96$combevtype))` distinct event types on which to perform the analysis. 
+
+#Exploratory Analysis:
+Total Damage Over 15 Year Period: 
+To assist with the analysis, I created a function that will take a data set and two different variables as inputs. The function will group the first variable by the second variable and take the sum of the first variable within the groups created. For example, to analyze which event types have caused the most crop damage, the function will group crop damage by each individual event type and take the sum of crop damage for that event type. I ran this on each damage variable and graphed the top 5 causes of each.
+
+```{r, echo=TRUE, fig.align='center', fig.width=9, fig.height=5}
+breakdown <- function(dmgVar, groupVar, data){
+    frm <- paste(dmgVar, groupVar, sep="~")
+    bygroup <- aggregate(formula(frm), FUN=sum, data=data)
+    bygroup2 <- bygroup[order(bygroup[,2], decreasing=TRUE),]
+    return(bygroup2)
+}
+#run the function on the four variables of interest grouping them by event type
+cropbyev <- breakdown("newcropdmg", "combevtype", storm96)
+propbyev <- breakdown("newpropdmg", "combevtype", storm96)
+fatbyev <- breakdown("fatalities", "combevtype", storm96)
+injbyev <- breakdown("injuries", "combevtype", storm96)
+# create individual graphs for the top five causes of each variable of interest
+cropdg <- ggplot(cropbyev[1:5,], aes(x=combevtype, y=newcropdmg)) + geom_bar(stat='identity') + labs(x='Weather Event', y='Total Crop Damage \n in US Dollars', title= 'Weather Events that cause \n the most Crop Damage') + scale_x_discrete(limits =c("frost/freeze", "hail", "flood", "hurricane", "drought"))
+propdg <- ggplot(propbyev[1:5,], aes(x=combevtype, y=newpropdmg)) + geom_bar(stat='identity') + labs(x='Weather Event', y='Total Prop Damage \n in US Dollars', title= 'Weather Events that cause \n the most Property Damage') + scale_x_discrete(limits=c("flash fld", "tornado", "storm surge", "hurricane", "flood"))
+fatg <- ggplot(fatbyev[1:5,], aes(x=combevtype, y=fatalities)) + geom_bar(stat='identity') + labs(x='Weather Event', y='Fatalities', title= 'Weather Events that cause \n the most Fatalities') + scale_x_discrete(limits=c("rip current", "lightning", "flash fld", "tornado", "extreme heat"))
+injg <- ggplot(injbyev[1:5,], aes(x=combevtype, y=injuries)) + geom_bar(stat='identity') + labs(x='Weather Event', y='Injuries', title= 'Weather Events that cause \n the most Injury') + scale_x_discrete(limits=c("lightning", "thunderstorm wd", "flood", "extreme heat", "tornado"))
+
+#arrange all of the graphs in one figure
+grid.arrange(cropdg, fatg, propdg, injg, nrow=2, ncol=2)
+
+#create variables of total damage amounts to use in text below
+totcrop <- sum(storm96$newcropdmg)
+totprop <- sum(storm96$newpropdmg)
+totfat <- sum(storm96$fatalities)
+totinj <- sum(storm96$injuries)
+```
+(Top left graph) The total amount of crop damage reported between 1996 and 2011 was `r totcrop` USD. The leading cause of that damage was drought, which caused `r cropbyev[1, 2]` USD or approximately `r round(cropbyev[1, 2]/totcrop*100)` percent. Next are hurricanes and flooding at `r cropbyev[2,2]` or approximately `r round(cropbyev[2, 2]/totcrop*100)` and `r cropbyev[3,2]` or approximately `r round(cropbyev[3, 2]/totcrop*100)` respectively. 
+
+(Middle left graph) The total amount of property damage reported between 1996 and 2011 was `r totprop` USD, and the greatest contributor to property damage was flooding (`r round(propbyev[1,2]/totprop*100)`%). Hurricanes and storm surges account for `r round(propbyev[2,2]/totprop*100)` and `r round(propbyev[3,2]/totprop*100)` percent of the total damage. 
+
+(Top right graph) The total number of fatalities reported in this period is `r totfat`, `r round(fatbyev[1,2]/totfat*100)` percent of them were caused by extreme heat. The next leading cause of weather related fatalities is tornados, which caused `r fatbyev[2,2]` deaths or `r round(fatbyev[2,2]/totfat*100)` percent of total number of fatalities for this period. 
+
+(Middle right graph) The total number of injuries reported in this period is `r totinj`, and `r round(injbyev[1,2]/totinj*100)` percent of those were caused by tornados. The next two leading causes of injury are extreme heat and flooding, which have caused `r injbyev[2,2]` and `r injbyev[3,2]` injuries repectively. 
+
+Changes in Damage From Year to Year:  
+To analyze changes in the amounts of damage reported each year throughout this period, I used the same function as above to calculate the total amounts of damage reported each year. Then I created graphs showing the total amount of property damage, crop damage, fatalities and injuries reported each year between 1996 and 2011. 
+```{r, echo=TRUE, fig.align='center', fig.width=9, fig.height=5}
+cropbyyr <- breakdown('newcropdmg', 'year', storm96)
+propbyyr <- breakdown('newpropdmg', 'year', storm96)
+fatbyyr <- breakdown('fatalities', 'year', storm96)
+injbyyr <- breakdown('injuries', 'year', storm96)
+# create graphs of damage over time
+cropyrg <- ggplot(cropbyyr, aes(x=year, y=newcropdmg)) + geom_bar(stat='identity') + labs(x='Year', y='US Dollars', title= 'Crop Damage per Year') + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+propyrg <- ggplot(propbyyr, aes(x=year, y=newpropdmg)) + geom_bar(stat='identity') + labs(x='Year', y='US Dollars', title= 'Property Damage per Year') + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+fatyrg <- ggplot(fatbyyr, aes(x=year, y=fatalities)) + geom_bar(stat='identity') + labs(x='Year', y='Number of Fatalities', title= 'Fatalities per Year') + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+injyrg <- ggplot(injbyyr, aes(x=year, y=injuries)) + geom_bar(stat='identity') + labs(x='Year', y='Number of People Injured', title= 'Injuries per Year') +theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+#arrange all of the graphs in one figure
+grid.arrange(cropyrg, fatyrg, propyrg, injyrg, nrow=2, ncol=2)
+```
+These plots show that there are interesting patterns in crop and property damage over time. For instance, crop damage peaks in 1998, and then it follows a pattern of progressively decreasing each year for 5 years. Then it peaks again in 2005 and follows a similar pattern of decreasing. Isolating 1998 and calculating the total crop damage by event for that year shows that drought was the major cause of crop damage. 
+```{r, echo=TRUE}
+storm98 <- storm96[storm96$year==1998,]
+crop98 <- breakdown('newcropdmg', 'combevtype', storm98)
+head(crop98)
+```
+Performing the same subsetting and calculation for 2005 shows that Hurricane Katrina was responsible for the largest amount of crop damage this year, but the damage caused by drought is also significant. Then, in 2006 the leading cause of crop damage was drought once again. 
+
+```{r, echo=TRUE}
+storm05 <- storm96[storm96$year==2005,] #extract only data from 2005
+crop05 <- breakdown('newcropdmg', 'combevtype', storm05) #calculate total crop damage by event type using the 2005 data
+head(crop05)
+storm06 <- storm96[storm96$year==2006,] #extract only data from 2006
+crop06 <- breakdown('newcropdmg', 'combevtype', storm06) #calculate total crop damage by event type using the 2006 data
+head(crop06)
+```
+There was also a huge spike in property damage reported in 2005 and 2006. The leading cause of damage in 2005 was Hurricane Katrina. Though, 15 reports of damage in Florida and three report of damage in Louisiana were attributed to storm surges, also related to Hurricane Katrina. In 2006, the leading cause of property damage was reported to be flooding. A quick look at the number of times flooding was reported as a cause of damage in each state in 2006 shows that it was reported all over the country. Furthermore the most property damage was reported in California, suggesting that this spike in property damage is not related to Hurricane Katrina. 
+
+```{r, echo=TRUE}
+prop05 <- breakdown('newpropdmg', 'combevtype', storm05) #calculate total property damage by event type using the 2005 data
+head(prop05)
+prop06 <- breakdown('newpropdmg', 'combevtype', storm06) #calculate total property damage by event type using the 2006 data
+head(prop06)
+stormsurge05 <- storm05[storm05$combevtype=='storm surge',] #extract only the observations that report 'storm surge' as the cause of damage from the 2005 data
+table(stormsurge05$state) #calculate the number of times each state in the subset of 2005 storm surge data 
+flood06 <- storm06[storm06$combevtype=='flood',] #extract only the observations that report 'flood' as the cause of damage from the 2006 data
+table(flood06$state) #calculate the number of times each state appears in the 2006 flood data
+floodstate06 <- breakdown('newpropdmg', 'state', flood06) #calculate the amount of damage reported in each state due to flooding in 2006
+head(floodstate06)
+```
+The plots on the right show that fatalities and injuries follow similar patterns. Both remain relatively constant, with the exception of spikes in weather related fatalities and injuries. Fatalities spike in 1999 and 2011. In 1999, extreme heat was reported at the cause of 502 deaths, 5 times more than the event associated with the next largest number of deaths. Meanwhile, in 2011, tornados claimed 587 deaths, which is almost 6 times greater than the next leading cause of death, extreme heat. The number of injuries peaks in 1998, when the major causes of injury were flooding (6136) and tornados (1875) and 2011. In 2011, tornados caused the largest number of injuries (6163), followed by extreme heat (749).
+
+```{r, echo=TRUE}
+storm99 <- storm96[storm96$year==1999,] #extract only the data from 1999
+fat99 <- breakdown('fatalities', 'combevtype', storm99) #calculate the total number of fatalities reported for each event type in 1999
+head(fat99)
+storm11 <- storm96[storm96$year==2011,] #extract only the data from 2011
+fat11 <- breakdown('fatalities', 'combevtype', storm11) #calculate the total number of fatalities reported for each event type in 2011
+head(fat11)
+inj98 <- breakdown('injuries', 'combevtype', storm98) #calculate the total number of injuries reported for each event type in 1998
+head(inj98)
+inj11 <- breakdown('injuries', 'combevtype', storm11) #calculate the total number of injuries reported for each event type in 2011
+head(inj11)
+```
+
+It is worth noting that in total dollar amounts, extreme weather events cause much more property damage than crop damage. Similarly, in absolute number, extreme weather events cause more injuries than fatalities. (Shown in the figure below.) 
+```{r, echo=TRUE, fig.align='center', fig.width=9, fig.height=5}
+pcdiff <- mean(propbyyr$newpropdmg - cropbyyr$newcropdmg)
+ifdiff <- mean(injbyyr$injuries - fatbyyr$fatalities)
+#combine yearly crop and property damage into one data frame and yearly fatalities and injuries into another in order to build a graph showing a comparison
+yearlycomp <- function(data, dmgVar){
+    d <- data
+    colnames(d) <- c("year", "damage")
+    d$damage.type <- dmgVar
+    return(d)
+}
+newcropbyyr <- yearlycomp(cropbyyr, "crop damage")
+newpropbyyr <- yearlycomp(propbyyr, "property damage")
+newfatbyyr <- yearlycomp(fatbyyr, "fatalities")
+newinjbyyr <- yearlycomp(injbyyr, "injuries")
+cpcomp <- rbind(newcropbyyr, newpropbyyr)
+ficomp <- rbind(newfatbyyr, newinjbyyr)
+# create graphs
+cpcompg <- ggplot(cpcomp, aes(x=year, y=damage, fill=damage.type)) + geom_bar(stat="identity", position = "dodge") + labs(x="Year", y="Damage in US Dollars", title= "Property vs. Crop Damage")
+ficompg <- ggplot(ficomp, aes(x=year, y=damage, fill=damage.type)) + geom_bar(stat='identity', position = 'dodge') + labs(x= 'Year', y='Number of People \n Injured or Killed', title='Injuries vs. Fatalities')
+grid.arrange(cpcompg, ficompg, nrow= 2, ncol=1)
+#calculate the combined percent of the total crop damage, property damage, fatalities and injuries cause by hurricanes, floods, drought, extreme heat and tornados
+dhflcrop <- sum(cropbyev[1,2], cropbyev[2,2], cropbyev[3,2])
+flhtprop <- sum(propbyev[1,2], propbyev[2,2], propbyev[4,2]) 
+tehflfat <- sum(fatbyev[1,2], fatbyev[2,2])
+tehflinj <- sum(injbyev[1,2], injbyev[2,2], injbyev[3,2])
+centcovercrop <- dhflcrop/totcrop*100
+centcoverprop <- flhtprop/totprop * 100
+centcoverfat <- tehflfat/totfat * 100
+centcoverinj <- tehflinj/totinj * 100
+```
+In fact, extreme weather events cause on average `r pcdiff` more damage in US dollars to property than to crops each year and `r ifdiff` more injuries than fatalities each year. 
+
+#Results
+Severe weather events are costlier in terms property damage than crop damage. Initially, this may lead to the conclusion that more time, money and energy should be spent preparing for the types of weather events that cause the most property damage. However, the natures of property damage and crop damage may lead to different indirect costs and consequences that should also be considered. For example, property damage is incurred by a combination of private citizens, cities and counties and businesses. Furthermore, some properties may be insured, such as homes, other properties, such as bridges, may not be insured. Finally, severe property damage may indirectly lead to local, state and the national governments spending money on temporary shelter for families who have lost their homes, temporary structures for schools or hospitals or to assist with the rebuilding of communities after the emergency has ended. On the other hand, while the immediate cost of crop damage is largely incurred by private citizens or corporate farms and their insurers, crop damage may cause a shortage of certain food items leading to increased prices and possible hardship for everyday citizens. In conclusion, before policy decisions are made, the direct costs, the indirect costs and who bears the cost of damage caused by extreme weather events should be carefully analyzed. 
+
+Focusing on weather events that are among the leading causes of more than one type of damage could be a viable strategy to save time, energy, and money. For instance, flooding is the leading cause of property damage and the third leading cause of crop damage and weather related injuries. Hurricanes, which are often also responsible for flooding and storm surges, are the second leading cause of crop damage and property damage. Tornados are the leading cause of weather related injury, the second leading cause of weather related fatalities and the fourth leading cause of property damage. Extreme heat is the leading cause of weather related fatalities and the second leading cause of weather related injury. This list (hurricane, flood, extreme heat and tornados) covers the top two leading causes of each type of damage or harm with one exception. Drought is the only extreme weather event that causes substantial crop damage but is not associated with any other types of damage or harm. Including drought, this list covers `r centcovercrop` percent of all crop damage, `r centcoverprop` percent of total property damage, `r centcoverfat` percent of all fatalities and `r centcoverinj` percent of the total number of injuries caused by extreme weather events between 1996 and 2011. 
+
+Since one extreme weather event can often cause several different types of damage or harm, this analysis of the direct cost incurred in US dollars, injuries or fatalities, leads to the conclusion that drought, hurricanes, flooding, extreme heat and tornados cause the most crop damage, property damage and injuries throughout the country. Meanwhile, extreme heat, tornados, flash floods, lightening, and rip currents cause most of the weather related fatalities across the country.  
+
+#References
+Storm Data Preparation, August 17, 2007. National Weather Service. National Oceanic and Atmospheric Administration. http://www.nws.noaa.gov/directives/
+
+[1]: http://ire.org/nicar/database-library/databases/storm-events/ "the accuracy of the data prior to 1996 is uncertain because of the way the information was archived by NCDC"
+[2]: http://www.nws.noaa.gov/directives/ "documentation"
